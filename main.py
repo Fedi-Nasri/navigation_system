@@ -7,6 +7,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QGraphicsView,
                             QWidget, QPushButton, QLabel, QHBoxLayout)
 from PyQt5.QtGui import QPixmap, QImage, QPen, QColor, QWheelEvent, QPainter
 from PyQt5.QtCore import Qt, QPointF
+import math
 
 class NavigationManager:
     def __init__(self, map_path, grid_size=0.5, resolution=0.05):
@@ -17,6 +18,7 @@ class NavigationManager:
         self.grid_size = grid_size
         self.resolution = resolution
         self.waypoints = []
+        self.border_points = []
     
     def add_waypoint(self, x, y):
         if y < 0 or y >= self.height or x < 0 or x >= self.width:
@@ -57,6 +59,47 @@ class NavigationManager:
                 f.write(f"      x: {x:.2f}\n")
                 f.write(f"      y: {y:.2f}\n")
                 f.write(f"      name: wp{i+1}\n")
+    
+    def create_border_points(self):
+        upper_points = []
+        for x in range(self.width):
+            for y in range(self.height):
+                if self.map_img[y][x] >= 205:
+                    Y_top = y
+                    break
+            else:
+                continue
+            if Y_top + 10 < self.height and self.map_img[Y_top + 10][x] >= 205:
+                upper_points.append(QPointF(x, Y_top + 10))
+        
+        lower_points = []
+        for x in range(self.width):
+            for y in range(self.height-1, -1, -1):
+                if self.map_img[y][x] >= 205:
+                    Y_bottom = y
+                    break
+            else:
+                continue
+            if Y_bottom - 10 >= 0 and self.map_img[Y_bottom - 10][x] >= 205:
+                lower_points.append(QPointF(x, Y_bottom - 10))
+        
+        selected_upper = self.select_points_with_min_distance(upper_points, 80)
+        selected_lower = self.select_points_with_min_distance(lower_points, 80)
+        self.border_points = selected_upper + selected_lower
+    
+    def select_points_with_min_distance(self, points, min_dist):
+        if not points:
+            return []
+        points_sorted = sorted(points, key=lambda p: p.x())
+        selected = [points_sorted[0]]
+        for p in points_sorted[1:]:
+            last = selected[-1]
+            dx = p.x() - last.x()
+            dy = p.y() - last.y()
+            dist = math.sqrt(dx**2 + dy**2)
+            if dist >= min_dist:
+                selected.append(p)
+        return selected
 
 class PathVisualizer:
     def __init__(self, scene, navigation_manager):
@@ -65,6 +108,7 @@ class PathVisualizer:
         self.grid_items = []
         self.waypoint_items = []
         self.path_items = []
+        self.border_point_items = []
     
     def draw_grid(self):
         for item in self.grid_items:
@@ -104,22 +148,49 @@ class PathVisualizer:
             self.scene.removeItem(item)
         self.path_items.clear()
         
-        if len(self.nav_manager.get_waypoints()) < 2:
+        waypoints = self.nav_manager.get_waypoints()
+        if len(waypoints) < 2:
             return
         
         pen = QPen(QColor(255, 0, 0))
         pen.setWidth(2)
         
-        waypoints = self.nav_manager.get_waypoints()
         for i in range(len(waypoints) - 1):
             p1 = waypoints[i]
             p2 = waypoints[i+1]
+            # Draw line
             line = self.scene.addLine(p1.x(), p1.y(), p2.x(), p2.y(), pen)
             self.path_items.append(line)
+            # Calculate distance
+            dx = p2.x() - p1.x()
+            dy = p2.y() - p1.y()
+            dist_px = math.sqrt(dx**2 + dy**2)
+            dist_m = dist_px * self.nav_manager.resolution
+            # Midpoint
+            mid_x = (p1.x() + p2.x()) / 2
+            mid_y = (p1.y() + p2.y()) / 2
+            # Add text
+            text = self.scene.addText(f"{dist_m:.2f} m")
+            text.setPos(mid_x, mid_y - 10)  # Move slightly up
+            text.setDefaultTextColor(Qt.black)
+            self.path_items.append(text)
+    
+    def draw_border_points(self):
+        for item in self.border_point_items:
+            self.scene.removeItem(item)
+        self.border_point_items.clear()
+        
+        pen = QPen(Qt.green)
+        pen.setWidth(2)
+        
+        for p in self.nav_manager.border_points:
+            circle = self.scene.addEllipse(p.x()-5, p.y()-5, 10, 10, pen, QColor(0, 255, 0, 100))
+            self.border_point_items.append(circle)
     
     def update_display(self):
         self.draw_waypoints()
         self.draw_path()
+        self.draw_border_points()
 
 class MapNavigator(QMainWindow):
     def __init__(self, map_path="map.pgm"):
@@ -168,11 +239,15 @@ class MapNavigator(QMainWindow):
         self.save_btn = QPushButton("Save Waypoints")
         self.save_btn.clicked.connect(self.save_waypoints)
         
+        self.create_border_btn = QPushButton("Create Border Points")
+        self.create_border_btn.clicked.connect(self.create_border_points)
+        
         control_layout.addWidget(self.zoom_in_btn)
         control_layout.addWidget(self.zoom_out_btn)
         control_layout.addWidget(self.reset_zoom_btn)
         control_layout.addWidget(self.clear_btn)
         control_layout.addWidget(self.save_btn)
+        control_layout.addWidget(self.create_border_btn)
         
         self.status_label = QLabel("Click on the map to add waypoints | "
                                  "Mouse wheel to zoom | Right-click drag to pan")
@@ -215,10 +290,17 @@ class MapNavigator(QMainWindow):
         self.nav_manager.save_waypoints()
         self.status_label.setText(f"Saved {len(self.nav_manager.get_waypoints())} waypoints to waypoints.yaml")
     
+    def create_border_points(self):
+        self.nav_manager.create_border_points()
+        self.path_visualizer.update_display()
+        self.update_status()
+    
     def update_status(self):
-        self.status_label.setText(f"{len(self.nav_manager.get_waypoints())} waypoints set | "
+        wp_count = len(self.nav_manager.get_waypoints())
+        bp_count = len(self.nav_manager.border_points)
+        self.status_label.setText(f"{wp_count} waypoints | {bp_count} border points | "
                                 f"Zoom: {self.zoom_level:.1f}x | "
-                                "Click to add, Right-click to remove")
+                                "Click to add waypoint, Right-click to remove")
     
     def zoom_in(self):
         self.zoom_level = min(self.zoom_level * self.zoom_factor, self.max_zoom)
