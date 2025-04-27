@@ -24,7 +24,7 @@ class NavigationManager:
         if y < 0 or y >= self.height or x < 0 or x >= self.width:
             return False
         pixel_value = self.map_img[int(y)][int(x)]
-        if pixel_value < 205:  # Obstacle or unknown
+        if pixel_value != 255:  # Only white pixels (255) are navigable
             return False
         self.waypoints.append(QPointF(x, y))
         return True
@@ -61,45 +61,38 @@ class NavigationManager:
                 f.write(f"      name: wp{i+1}\n")
     
     def create_border_points(self):
-        upper_points = []
-        for x in range(self.width):
-            for y in range(self.height):
-                if self.map_img[y][x] >= 205:
-                    Y_top = y
-                    break
-            else:
-                continue
-            if Y_top + 10 < self.height and self.map_img[Y_top + 10][x] >= 205:
-                upper_points.append(QPointF(x, Y_top + 10))
-        
-        lower_points = []
-        for x in range(self.width):
-            for y in range(self.height-1, -1, -1):
-                if self.map_img[y][x] >= 205:
-                    Y_bottom = y
-                    break
-            else:
-                continue
-            if Y_bottom - 10 >= 0 and self.map_img[Y_bottom - 10][x] >= 205:
-                lower_points.append(QPointF(x, Y_bottom - 10))
-        
-        selected_upper = self.select_points_with_min_distance(upper_points, 80)
-        selected_lower = self.select_points_with_min_distance(lower_points, 80)
-        self.border_points = selected_upper + selected_lower
-    
-    def select_points_with_min_distance(self, points, min_dist):
-        if not points:
-            return []
-        points_sorted = sorted(points, key=lambda p: p.x())
-        selected = [points_sorted[0]]
-        for p in points_sorted[1:]:
-            last = selected[-1]
-            dx = p.x() - last.x()
-            dy = p.y() - last.y()
-            dist = math.sqrt(dx**2 + dy**2)
-            if dist >= min_dist:
-                selected.append(p)
-        return selected
+        print("Starting create_border_points")
+        print(f"Map shape: {self.height}, {self.width}")
+        try:
+            # Create binary map (navigable: 255, border: 0)
+            binary_map = (self.map_img == 255).astype(np.uint8) * 255
+            print("Binary map created")
+            # Compute distance transform to find distance to nearest border pixel
+            dist = cv2.distanceTransform(binary_map, cv2.DIST_L2, 3)
+            print("Distance transform computed")
+            height, width = self.map_img.shape
+            # Sample every 10th pixel to reduce memory usage
+            candidate_points = []
+            for i in range(0, height, 10):
+                for j in range(0, width, 10):
+                    if 19.5 <= dist[i,j] <= 20.5 and self.map_img[i,j] == 255:
+                        candidate_points.append((j, i))
+            print(f"Number of candidate points: {len(candidate_points)}")
+            # Select points spaced at least 3m (60 pixels) apart
+            selected_points = []
+            while candidate_points:
+                p = candidate_points[0]
+                selected_points.append(p)
+                # Check against all selected points to ensure spacing
+                candidate_points = [q for q in candidate_points[1:] 
+                                  if all(math.sqrt((q[0] - s[0])**2 + (q[1] - s[1])**2) >= 60 
+                                         for s in selected_points)]
+            print(f"Number of selected points: {len(selected_points)}")
+            self.border_points = [QPointF(x, y) for x, y in selected_points]
+            print("Border points created")
+        except Exception as e:
+            print(f"Error in create_border_points: {e}")
+            raise
 
 class PathVisualizer:
     def __init__(self, scene, navigation_manager):
@@ -135,7 +128,7 @@ class PathVisualizer:
         
         for i, point in enumerate(self.nav_manager.get_waypoints()):
             circle = self.scene.addEllipse(point.x()-5, point.y()-5, 10, 10, 
-                                           QPen(Qt.red), QColor(255, 100, 100))
+                                         QPen(Qt.red), QColor(255, 100, 100))
             self.waypoint_items.append(circle)
             
             text = self.scene.addText(str(i+1))
@@ -158,20 +151,16 @@ class PathVisualizer:
         for i in range(len(waypoints) - 1):
             p1 = waypoints[i]
             p2 = waypoints[i+1]
-            # Draw line
             line = self.scene.addLine(p1.x(), p1.y(), p2.x(), p2.y(), pen)
             self.path_items.append(line)
-            # Calculate distance
             dx = p2.x() - p1.x()
             dy = p2.y() - p1.y()
             dist_px = math.sqrt(dx**2 + dy**2)
             dist_m = dist_px * self.nav_manager.resolution
-            # Midpoint
             mid_x = (p1.x() + p2.x()) / 2
             mid_y = (p1.y() + p2.y()) / 2
-            # Add text
             text = self.scene.addText(f"{dist_m:.2f} m")
-            text.setPos(mid_x, mid_y - 10)  # Move slightly up
+            text.setPos(mid_x, mid_y - 10)
             text.setDefaultTextColor(Qt.black)
             self.path_items.append(text)
     
@@ -266,6 +255,17 @@ class MapNavigator(QMainWindow):
         pixmap = QPixmap.fromImage(qimg)
         self.scene.addPixmap(pixmap)
         
+        # Add border visualization
+        border_mask = (self.nav_manager.map_img == 0).astype(np.uint8) * 255
+        border_image = np.zeros((self.nav_manager.height, self.nav_manager.width, 4), dtype=np.uint8)
+        border_image[:, :, 2] = border_mask  # Red channel
+        border_image[:, :, 3] = border_mask  # Alpha channel
+        bytes_per_line = 4 * self.nav_manager.width
+        qimg_border = QImage(border_image.tobytes(), self.nav_manager.width, self.nav_manager.height, 
+                            bytes_per_line, QImage.Format_ARGB32)
+        pixmap_border = QPixmap.fromImage(qimg_border)
+        self.scene.addPixmap(pixmap_border)
+        
         self.path_visualizer.draw_grid()
         self.path_visualizer.update_display()
     
@@ -274,7 +274,7 @@ class MapNavigator(QMainWindow):
             self.path_visualizer.update_display()
             self.update_status()
         else:
-            self.status_label.setText("Cannot place waypoint in obstacle/unknown area!")
+            self.status_label.setText("Cannot place waypoint on border or non-navigable area!")
     
     def remove_nearest_waypoint(self, x, y):
         self.nav_manager.remove_nearest_waypoint(x, y)
@@ -291,9 +291,13 @@ class MapNavigator(QMainWindow):
         self.status_label.setText(f"Saved {len(self.nav_manager.get_waypoints())} waypoints to waypoints.yaml")
     
     def create_border_points(self):
-        self.nav_manager.create_border_points()
-        self.path_visualizer.update_display()
-        self.update_status()
+        try:
+            self.nav_manager.create_border_points()
+            self.path_visualizer.update_display()
+            self.update_status()
+        except Exception as e:
+            print(f"Error in create_border_points: {e}")
+            self.status_label.setText(f"Error creating border points: {e}")
     
     def update_status(self):
         wp_count = len(self.nav_manager.get_waypoints())
