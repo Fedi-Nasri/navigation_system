@@ -1,0 +1,157 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Leaflet.js Map with Polygon Drawing</title>
+    <!-- Leaflet.js CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <!-- Leaflet.draw CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css" />
+    <style>
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+        }
+        #map {
+            height: 500px;
+            width: 100%;
+        }
+        #coordinates {
+            margin: 10px;
+            padding: 10px;
+            background: #f0f0f0;
+            border-radius: 5px;
+        }
+        #instructions {
+            margin: 10px;
+        }
+        button {
+            padding: 10px;
+            margin: 5px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div id="instructions">
+        <p>Instructions: Click the polygon icon in the toolbar (top-left), then click on the map to draw a polygon. Click the first point again to complete. Coordinates of the vertices will appear below.</p>
+        <button id="clearPolygon">Clear Polygon</button>
+    </div>
+    <div id="map"></div>
+    <div id="coordinates">
+        <h3>Polygon Coordinates:</h3>
+        <pre id="coordsOutput">No coordinates yet.</pre>
+    </div>
+
+    <!-- Leaflet.js -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- Leaflet.draw -->
+    <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
+    <script>
+        // Initialize the map, centered on Eiffel Tower
+        const map = L.map('map').setView([36.81138, 10.20501], 14);
+
+        // Add OpenStreetMap tiles (free)
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        }).addTo(map);
+
+        // Create a feature group to store drawn polygons
+        const drawnItems = new L.FeatureGroup();
+        map.addLayer(drawnItems);
+
+        // Initialize Leaflet.draw control for polygon drawing
+        const drawControl = new L.Control.Draw({
+            edit: {
+                featureGroup: drawnItems // Allow editing of drawn polygons
+            },
+            draw: {
+                polygon: {
+                    allowIntersection: false, // Prevent self-intersecting polygons
+                    showArea: true // Display area of the polygon
+                },
+                polyline: false, // Disable other shapes
+                circle: false,
+                rectangle: false,
+                marker: false,
+                circlemarker: false
+            }
+        });
+        map.addControl(drawControl);
+
+        // Event listener for when a polygon is created
+        map.on(L.Draw.Event.CREATED, function (event) {
+            const layer = event.layer;
+            drawnItems.clearLayers(); // Remove any previous polygon
+            drawnItems.addLayer(layer); // Add new polygon to map
+            extractCoordinates(layer); // Extract and display coordinates
+        });
+
+        // Event listener for when a polygon is edited
+        map.on(L.Draw.Event.EDITED, function (event) {
+            const layers = event.layers;
+            layers.eachLayer(function (layer) {
+                extractCoordinates(layer); // Update coordinates after edit
+            });
+        });
+
+        // Clear polygon button
+        document.getElementById('clearPolygon').addEventListener('click', function () {
+            drawnItems.clearLayers(); // Remove all polygons
+            document.getElementById('coordsOutput').textContent = 'No coordinates yet.';
+        });
+
+        // Function to extract and display coordinates
+        function extractCoordinates(layer) {
+            const latLngs = layer.getLatLngs()[0]; // Get array of vertex coordinates
+            const coordinates = latLngs.map(point => ({
+                lat: point.lat,
+                lng: point.lng
+            }));
+            const coordsOutput = document.getElementById('coordsOutput');
+            coordsOutput.textContent = JSON.stringify(coordinates, null, 2); // Display as JSON
+            console.log('Polygon Coordinates:', coordinates); // Log to console
+        }
+    </script>
+</body>
+</html>
