@@ -18,7 +18,6 @@ class NavigationManager:
         self.grid_size = grid_size
         self.resolution = resolution
         self.waypoints = []
-        self.border_points = []
     
     def add_waypoint(self, x, y):
         if y < 0 or y >= self.height or x < 0 or x >= self.width:
@@ -59,40 +58,105 @@ class NavigationManager:
                 f.write(f"      x: {x:.2f}\n")
                 f.write(f"      y: {y:.2f}\n")
                 f.write(f"      name: wp{i+1}\n")
+
+class CoveragePathPlanner:
+    def __init__(self, map_img):
+        self.map_img = map_img
+        self.height, self.width = map_img.shape
     
-    def create_border_points(self):
-        print("Starting create_border_points")
-        print(f"Map shape: {self.height}, {self.width}")
-        try:
-            # Create binary map (navigable: 255, border: 0)
-            binary_map = (self.map_img == 255).astype(np.uint8) * 255
-            print("Binary map created")
-            # Compute distance transform to find distance to nearest border pixel
-            dist = cv2.distanceTransform(binary_map, cv2.DIST_L2, 3)
-            print("Distance transform computed")
-            height, width = self.map_img.shape
-            # Sample every 10th pixel to reduce memory usage
-            candidate_points = []
-            for i in range(0, height, 10):
-                for j in range(0, width, 10):
-                    if 19.5 <= dist[i,j] <= 20.5 and self.map_img[i,j] == 255:
-                        candidate_points.append((j, i))
-            print(f"Number of candidate points: {len(candidate_points)}")
-            # Select points spaced at least 3m (60 pixels) apart
-            selected_points = []
-            while candidate_points:
-                p = candidate_points[0]
-                selected_points.append(p)
-                # Check against all selected points to ensure spacing
-                candidate_points = [q for q in candidate_points[1:] 
-                                  if all(math.sqrt((q[0] - s[0])**2 + (q[1] - s[1])**2) >= 60 
-                                         for s in selected_points)]
-            print(f"Number of selected points: {len(selected_points)}")
-            self.border_points = [QPointF(x, y) for x, y in selected_points]
-            print("Border points created")
-        except Exception as e:
-            print(f"Error in create_border_points: {e}")
-            raise
+    def get_navigable_range(self, y):
+        y_int = int(round(y))
+        if y_int < 0 or y_int >= self.height:
+            return None, None
+        x_min = None
+        x_max = None
+        for x in range(self.width):
+            if self.map_img[y_int, x] == 255:
+                if x_min is None:
+                    x_min = x
+                x_max = x
+        return x_min, x_max
+    
+    def generate_path(self, x0, y0):
+        points = [(float(x0), float(y0))]
+        x_current = float(x0)
+        y_current = float(y0)
+        direction = 1.0  # 1.0 for right, -1.0 for left
+        min_step = 10.0  # Minimum 0.5m (10 pixels)
+        vertical_step = 60.0  # 60 pixels = 3m
+        while True:
+            # Get navigable range for current y
+            y_int = int(round(y_current))
+            if y_int < 0 or y_int >= self.height:
+                break
+            x_min, x_max = self.get_navigable_range(y_current)
+            if x_min is None or x_max is None:
+                break
+            # Calculate dynamic spacing based on navigable width
+            if direction > 0:
+                x_start = max(x_current, x_min + 20)  # Start at least 1m from left border
+                x_end = x_max - 10  # Stop 0.5m from right border
+                if x_end <= x_start:
+                    break
+                available_width = x_end - x_start
+                num_points = min(4, int(available_width // min_step) + 1)  # Up to 4 points
+                if num_points > 1:
+                    step = available_width / (num_points - 1)
+                    for i in range(num_points):
+                        x_candidate = x_start + i * step
+                        x_int = int(round(x_candidate))
+                        y_int = int(round(y_current))
+                        if 0 <= x_int < self.width and self.map_img[y_int, x_int] == 255:
+                            points.append((x_candidate, y_current))
+                        else:
+                            break
+                    if len(points) > len(points) - num_points:
+                        x_current = points[-1][0]
+                elif num_points == 1:
+                    x_candidate = x_start
+                    x_int = int(round(x_candidate))
+                    y_int = int(round(y_current))
+                    if 0 <= x_int < self.width and self.map_img[y_int, x_int] == 255:
+                        points.append((x_candidate, y_current))
+                        x_current = x_candidate
+            else:
+                x_start = min(x_current, x_max - 20)  # Start at least 1m from right border
+                x_end = x_min + 10  # Stop 0.5m from left border
+                if x_end >= x_start:
+                    break
+                available_width = x_start - x_end
+                num_points = min(4, int(available_width // min_step) + 1)  # Up to 4 points
+                if num_points > 1:
+                    step = available_width / (num_points - 1)
+                    for i in range(num_points):
+                        x_candidate = x_start - i * step
+                        x_int = int(round(x_candidate))
+                        y_int = int(round(y_current))
+                        if 0 <= x_int < self.width and self.map_img[y_int, x_int] == 255:
+                            points.append((x_candidate, y_current))
+                        else:
+                            break
+                    if len(points) > len(points) - num_points:
+                        x_current = points[-1][0]
+                elif num_points == 1:
+                    x_candidate = x_start
+                    x_int = int(round(x_candidate))
+                    y_int = int(round(y_current))
+                    if 0 <= x_int < self.width and self.map_img[y_int, x_int] == 255:
+                        points.append((x_candidate, y_current))
+                        x_current = x_candidate
+            # Move up
+            y_next = y_current - vertical_step
+            if y_next < 0:
+                break
+            # Check if there's navigable area at y_next
+            x_min_next, x_max_next = self.get_navigable_range(y_next)
+            if x_min_next is None or x_max_next is None:
+                break
+            points.append((x_current, y_next))
+            y_current = y_next
+            direction = -direction
+        return points
 
 class PathVisualizer:
     def __init__(self, scene, navigation_manager):
@@ -101,7 +165,7 @@ class PathVisualizer:
         self.grid_items = []
         self.waypoint_items = []
         self.path_items = []
-        self.border_point_items = []
+        self.arrow_items = []
     
     def draw_grid(self):
         for item in self.grid_items:
@@ -127,8 +191,14 @@ class PathVisualizer:
         self.waypoint_items.clear()
         
         for i, point in enumerate(self.nav_manager.get_waypoints()):
-            circle = self.scene.addEllipse(point.x()-5, point.y()-5, 10, 10, 
-                                         QPen(Qt.red), QColor(255, 100, 100))
+            # Starting point (first waypoint) in blue
+            if i == 0:
+                circle = self.scene.addEllipse(point.x()-5, point.y()-5, 10, 10, 
+                                             QPen(Qt.blue), QColor(0, 0, 255))
+            else:
+                # Other waypoints in darker green
+                circle = self.scene.addEllipse(point.x()-5, point.y()-5, 10, 10, 
+                                             QPen(QColor(0, 100, 0)), QColor(0, 100, 0))
             self.waypoint_items.append(circle)
             
             text = self.scene.addText(str(i+1))
@@ -145,7 +215,7 @@ class PathVisualizer:
         if len(waypoints) < 2:
             return
         
-        pen = QPen(QColor(255, 0, 0))
+        pen = QPen(QColor(0, 255, 0))  # Green lines for path
         pen.setWidth(2)
         
         for i in range(len(waypoints) - 1):
@@ -164,22 +234,53 @@ class PathVisualizer:
             text.setDefaultTextColor(Qt.black)
             self.path_items.append(text)
     
-    def draw_border_points(self):
-        for item in self.border_point_items:
+    def draw_arrows(self):
+        for item in self.arrow_items:
             self.scene.removeItem(item)
-        self.border_point_items.clear()
-        
-        pen = QPen(Qt.green)
-        pen.setWidth(2)
-        
-        for p in self.nav_manager.border_points:
-            circle = self.scene.addEllipse(p.x()-5, p.y()-5, 10, 10, pen, QColor(0, 255, 0, 100))
-            self.border_point_items.append(circle)
+        self.arrow_items.clear()
+        waypoints = self.nav_manager.get_waypoints()
+        if len(waypoints) < 2:
+            return
+        for i in range(len(waypoints) - 1):
+            p1 = waypoints[i]
+            p2 = waypoints[i+1]
+            mid_x = (p1.x() + p2.x()) / 2
+            mid_y = (p1.y() + p2.y()) / 2
+            dx = p2.x() - p1.x()
+            dy = p2.y() - p1.y()
+            length = math.sqrt(dx**2 + dy**2)
+            if length == 0:
+                continue
+            dx /= length
+            dy /= length
+            arrow_length = 10
+            arrow_start_x = mid_x - arrow_length / 2 * dx
+            arrow_start_y = mid_y - arrow_length / 2 * dy
+            arrow_end_x = mid_x + arrow_length / 2 * dx
+            arrow_end_y = mid_y + arrow_length / 2 * dy
+            shaft = self.scene.addLine(arrow_start_x, arrow_start_y,
+                                      arrow_end_x, arrow_end_y,
+                                      QPen(Qt.black))
+            self.arrow_items.append(shaft)
+            arrow_size = 5
+            angle = math.atan2(dy, dx)
+            head1_x = arrow_end_x - arrow_size * math.cos(angle + math.pi / 6)
+            head1_y = arrow_end_y - arrow_size * math.sin(angle + math.pi / 6)
+            head2_x = arrow_end_x - arrow_size * math.cos(angle - math.pi / 6)
+            head2_y = arrow_end_y - arrow_size * math.sin(angle - math.pi / 6)
+            head1 = self.scene.addLine(arrow_end_x, arrow_end_y,
+                                      head1_x, head1_y,
+                                      QPen(Qt.black))
+            head2 = self.scene.addLine(arrow_end_x, arrow_end_y,
+                                      head2_x, head2_y,
+                                      QPen(Qt.black))
+            self.arrow_items.append(head1)
+            self.arrow_items.append(head2)
     
     def update_display(self):
         self.draw_waypoints()
         self.draw_path()
-        self.draw_border_points()
+        self.draw_arrows()
 
 class MapNavigator(QMainWindow):
     def __init__(self, map_path="map.pgm"):
@@ -228,15 +329,15 @@ class MapNavigator(QMainWindow):
         self.save_btn = QPushButton("Save Waypoints")
         self.save_btn.clicked.connect(self.save_waypoints)
         
-        self.create_border_btn = QPushButton("Create Border Points")
-        self.create_border_btn.clicked.connect(self.create_border_points)
+        self.create_path_btn = QPushButton("Create Path Planning")
+        self.create_path_btn.clicked.connect(self.create_coverage_path)
         
         control_layout.addWidget(self.zoom_in_btn)
         control_layout.addWidget(self.zoom_out_btn)
         control_layout.addWidget(self.reset_zoom_btn)
         control_layout.addWidget(self.clear_btn)
         control_layout.addWidget(self.save_btn)
-        control_layout.addWidget(self.create_border_btn)
+        control_layout.addWidget(self.create_path_btn)
         
         self.status_label = QLabel("Click on the map to add waypoints | "
                                  "Mouse wheel to zoom | Right-click drag to pan")
@@ -290,19 +391,22 @@ class MapNavigator(QMainWindow):
         self.nav_manager.save_waypoints()
         self.status_label.setText(f"Saved {len(self.nav_manager.get_waypoints())} waypoints to waypoints.yaml")
     
-    def create_border_points(self):
-        try:
-            self.nav_manager.create_border_points()
-            self.path_visualizer.update_display()
-            self.update_status()
-        except Exception as e:
-            print(f"Error in create_border_points: {e}")
-            self.status_label.setText(f"Error creating border points: {e}")
+    def create_coverage_path(self):
+        if not self.nav_manager.get_waypoints():
+            self.status_label.setText("Please add at least one waypoint as starting point")
+            return
+        start_point = self.nav_manager.get_waypoints()[0]
+        x0, y0 = start_point.x(), start_point.y()
+        planner = CoveragePathPlanner(self.nav_manager.map_img)
+        coverage_points = planner.generate_path(x0, y0)
+        for p in coverage_points:
+            self.nav_manager.add_waypoint(p[0], p[1])
+        self.path_visualizer.update_display()
+        self.update_status()
     
     def update_status(self):
         wp_count = len(self.nav_manager.get_waypoints())
-        bp_count = len(self.nav_manager.border_points)
-        self.status_label.setText(f"{wp_count} waypoints | {bp_count} border points | "
+        self.status_label.setText(f"{wp_count} waypoints | "
                                 f"Zoom: {self.zoom_level:.1f}x | "
                                 "Click to add waypoint, Right-click to remove")
     
