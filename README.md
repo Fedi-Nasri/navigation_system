@@ -27,9 +27,9 @@ Ensure you have Python installed on your system. This project requires Python 3.
 
 ## Usage
 
-1. Run the html file in the 'mapGenerating folder' to get cordinate for the area that you want to work with  
+1. Run the html file in the 'mapGenerating' folder to get cordinate for the area that you want to work with  
 
-2. coie and paste the cordinates to the map_data you can use the testing cordinates already in the scripte 
+2. copie and paste the cordinates to the map_data you can use the testing cordinates already in the scripte 
 
 
 4. Run the application:
