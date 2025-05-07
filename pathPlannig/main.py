@@ -4,20 +4,52 @@ import numpy as np
 import cv2
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QGraphicsView, 
                             QGraphicsScene, QGraphicsPixmapItem, QVBoxLayout,
-                            QWidget, QPushButton, QLabel, QHBoxLayout)
+                            QWidget, QPushButton, QLabel, QHBoxLayout, QComboBox,
+                            QMessageBox)
 from PyQt5.QtGui import QPixmap, QImage, QPen, QColor, QWheelEvent, QPainter
 from PyQt5.QtCore import Qt, QPointF
 import math
+import os
+import json
+from datetime import datetime
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from mapGenrating.map_data import get_available_maps, get_map_coordinates
+from mapGenrating.generatePGM_Map import generate_map
+
+# Firebase configuration (commented out - to be implemented manually)
+"""
+import firebase_admin
+from firebase_admin import credentials, db
+
+def initialize_firebase():
+    cred = credentials.Certificate("path/to/your/serviceAccountKey.json")
+    firebase_admin.initialize_app(cred, {
+        'databaseURL': 'your-database-url'
+    })
+
+def upload_waypoints_to_firebase(waypoints_data):
+    ref = db.reference('/waypoints')
+    ref.push(waypoints_data)
+"""
 
 class NavigationManager:
-    def __init__(self, map_path, grid_size=0.5, resolution=0.05):
+    def __init__(self, grid_size=0.5, resolution=0.05):
+        self.grid_size = grid_size
+        self.resolution = resolution
+        self.waypoints = []
+        self.map_img = None
+        self.height = 0
+        self.width = 0
+        self.current_map_name = None
+    
+    def load_map(self, map_path):
+        """Load a map from file"""
         self.map_img = cv2.imread(map_path, cv2.IMREAD_GRAYSCALE)
         if self.map_img is None:
             raise FileNotFoundError(f"Could not load map file: {map_path}")
         self.height, self.width = self.map_img.shape
-        self.grid_size = grid_size
-        self.resolution = resolution
-        self.waypoints = []
+        self.waypoints = []  # Clear waypoints when loading new map
+        return True
     
     def add_waypoint(self, x, y):
         if y < 0 or y >= self.height or x < 0 or x >= self.width:
@@ -58,6 +90,30 @@ class NavigationManager:
                 f.write(f"      x: {x:.2f}\n")
                 f.write(f"      y: {y:.2f}\n")
                 f.write(f"      name: wp{i+1}\n")
+    
+    def get_waypoints_data(self):
+        """Get waypoints data in a format suitable for Firebase"""
+        if not self.waypoints:
+            return None
+            
+        waypoints_meters = []
+        for i, p in enumerate(self.waypoints, 1):  # Start enumeration from 1
+            x = p.x() * self.resolution
+            y = (self.height - p.y()) * self.resolution
+            waypoints_meters.append({
+                "point_number": i,
+                "point_name": f"point{i}",
+                "x": round(x, 2),
+                "y": round(y, 2)
+            })
+            
+        return {
+            "map_name": self.current_map_name,
+            "timestamp": datetime.now().isoformat(),
+            "waypoints": waypoints_meters,
+            "resolution": self.resolution,
+            "grid_size": self.grid_size
+        }
 
 class CoveragePathPlanner:
     def __init__(self, map_img):
@@ -166,6 +222,35 @@ class PathVisualizer:
         self.waypoint_items = []
         self.path_items = []
         self.arrow_items = []
+    
+    def clear_all(self):
+        """Clear all visual elements from the scene"""
+        try:
+            # Clear grid items
+            for item in self.grid_items:
+                if item and item.scene():
+                    self.scene.removeItem(item)
+            self.grid_items.clear()
+            
+            # Clear waypoint items
+            for item in self.waypoint_items:
+                if item and item.scene():
+                    self.scene.removeItem(item)
+            self.waypoint_items.clear()
+            
+            # Clear path items
+            for item in self.path_items:
+                if item and item.scene():
+                    self.scene.removeItem(item)
+            self.path_items.clear()
+            
+            # Clear arrow items
+            for item in self.arrow_items:
+                if item and item.scene():
+                    self.scene.removeItem(item)
+            self.arrow_items.clear()
+        except Exception as e:
+            print(f"Error clearing items: {str(e)}")
     
     def draw_grid(self):
         for item in self.grid_items:
@@ -283,12 +368,18 @@ class PathVisualizer:
         self.draw_arrows()
 
 class MapNavigator(QMainWindow):
-    def __init__(self, map_path="map.pgm"):
+    def __init__(self):
         super().__init__()
-        self.setWindowTitle("Boat Navigation Waypoint Planner (with Zoom)")
+        self.setWindowTitle("Boat Navigation Waypoint Planner")
         self.setGeometry(100, 100, 1000, 800)
         
-        self.nav_manager = NavigationManager(map_path, grid_size=0.5, resolution=0.05)
+        # Create maps directory if it doesn't exist
+        self.maps_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "maps")
+        os.makedirs(self.maps_dir, exist_ok=True)
+        
+        self.nav_manager = NavigationManager(grid_size=0.5, resolution=0.05)
+        self.current_map_name = None
+        self.current_map_path = None
         
         self.zoom_level = 1.0
         self.zoom_factor = 1.25
@@ -302,7 +393,28 @@ class MapNavigator(QMainWindow):
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
         
-        control_layout = QHBoxLayout()
+        # Create two control layouts for better organization
+        top_control_layout = QHBoxLayout()
+        bottom_control_layout = QHBoxLayout()
+        
+        # Add map selection dropdown
+        self.map_selector = QComboBox()
+        self.map_selector.addItems(get_available_maps())
+        self.map_selector.currentIndexChanged.connect(self.on_map_selected)
+        
+        # Add generate map button
+        self.generate_map_btn = QPushButton("Generate Map")
+        self.generate_map_btn.clicked.connect(self.generate_selected_map)
+        
+        # Add upload waypoints button (next to generate map)
+        self.upload_btn = QPushButton("Upload Waypoints")
+        self.upload_btn.clicked.connect(self.upload_waypoints)
+        self.upload_btn.setEnabled(False)  # Initially disabled
+        
+        # Add buttons to top control layout
+        top_control_layout.addWidget(self.map_selector)
+        top_control_layout.addWidget(self.generate_map_btn)
+        top_control_layout.addWidget(self.upload_btn)
         
         self.scene = QGraphicsScene()
         self.view = CustomGraphicsView(self.scene)
@@ -312,7 +424,8 @@ class MapNavigator(QMainWindow):
         
         self.path_visualizer = PathVisualizer(self.scene, self.nav_manager)
         
-        self.setup_scene()
+        # Initialize empty scene
+        self.setup_empty_scene()
         
         self.zoom_in_btn = QPushButton("Zoom In (+)")
         self.zoom_in_btn.clicked.connect(self.zoom_in)
@@ -332,43 +445,183 @@ class MapNavigator(QMainWindow):
         self.create_path_btn = QPushButton("Create Path Planning")
         self.create_path_btn.clicked.connect(self.create_coverage_path)
         
-        control_layout.addWidget(self.zoom_in_btn)
-        control_layout.addWidget(self.zoom_out_btn)
-        control_layout.addWidget(self.reset_zoom_btn)
-        control_layout.addWidget(self.clear_btn)
-        control_layout.addWidget(self.save_btn)
-        control_layout.addWidget(self.create_path_btn)
+        # Add buttons to bottom control layout
+        bottom_control_layout.addWidget(self.zoom_in_btn)
+        bottom_control_layout.addWidget(self.zoom_out_btn)
+        bottom_control_layout.addWidget(self.reset_zoom_btn)
+        bottom_control_layout.addWidget(self.clear_btn)
+        bottom_control_layout.addWidget(self.save_btn)
+        bottom_control_layout.addWidget(self.create_path_btn)
         
-        self.status_label = QLabel("Click on the map to add waypoints | "
-                                 "Mouse wheel to zoom | Right-click drag to pan")
+        # Disable buttons until map is loaded
+        self.set_buttons_enabled(False)
         
-        main_layout.addLayout(control_layout)
+        # Add both control layouts to main layout
+        main_layout.addLayout(top_control_layout)
+        main_layout.addLayout(bottom_control_layout)
+        
+        self.status_label = QLabel("Please select a map and click 'Generate Map' to begin")
+        
         main_layout.addWidget(self.view)
         main_layout.addWidget(self.status_label)
         
         self.view.centerOn(self.scene.sceneRect().center())
     
+    def setup_empty_scene(self):
+        """Setup an empty scene with a message"""
+        try:
+            self.scene.clear()
+            self.path_visualizer.clear_all()
+            # Add a text item to indicate no map is loaded
+            text = self.scene.addText("No map loaded.\nPlease select a map and click 'Generate Map'")
+            text.setDefaultTextColor(Qt.gray)
+            # Center the text
+            text.setPos(self.view.width()/2 - text.boundingRect().width()/2,
+                       self.view.height()/2 - text.boundingRect().height()/2)
+        except Exception as e:
+            print(f"Error setting up empty scene: {str(e)}")
+            self.status_label.setText(f"Error setting up empty scene: {str(e)}")
+    
+    def set_buttons_enabled(self, enabled):
+        """Enable or disable buttons based on map loading state"""
+        try:
+            self.zoom_in_btn.setEnabled(enabled)
+            self.zoom_out_btn.setEnabled(enabled)
+            self.reset_zoom_btn.setEnabled(enabled)
+            self.clear_btn.setEnabled(enabled)
+            self.save_btn.setEnabled(enabled)
+            self.create_path_btn.setEnabled(enabled)
+            self.upload_btn.setEnabled(enabled)
+        except Exception as e:
+            print(f"Error setting button states: {str(e)}")
+    
+    def on_map_selected(self, index):
+        """Handle map selection from dropdown"""
+        self.current_map_name = self.map_selector.currentText()
+        self.status_label.setText(f"Selected map: {self.current_map_name}. Click 'Generate Map' to create it.")
+    
+    def upload_waypoints(self):
+        """Upload waypoints to Firebase"""
+        try:
+            # Get waypoints data
+            waypoints_data = self.nav_manager.get_waypoints_data()
+            
+            if not waypoints_data:
+                QMessageBox.warning(self, "No Waypoints", 
+                                  "Please add some waypoints before uploading.")
+                return
+            
+            # Print data that would be uploaded (for testing)
+            print("Preparing to upload waypoints data:")
+            print(json.dumps(waypoints_data, indent=2))
+            
+            # Show confirmation dialog
+            reply = QMessageBox.question(self, 'Confirm Upload',
+                                       f'Upload {len(waypoints_data["waypoints"])} waypoints to Firebase?',
+                                       QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            
+            if reply == QMessageBox.Yes:
+                # Firebase upload code (commented out - to be implemented manually)
+                """
+                try:
+                    initialize_firebase()
+                    upload_waypoints_to_firebase(waypoints_data)
+                    QMessageBox.information(self, "Success", 
+                                          "Waypoints uploaded successfully!")
+                except Exception as e:
+                    QMessageBox.critical(self, "Upload Error", 
+                                       f"Failed to upload waypoints: {str(e)}")
+                """
+                
+                # For testing, just print success message
+                print("Waypoints would be uploaded to Firebase here")
+                QMessageBox.information(self, "Test Mode", 
+                                      "In test mode: Waypoints would be uploaded to Firebase.\n" +
+                                      "Check console for data that would be uploaded.")
+                
+        except Exception as e:
+            QMessageBox.critical(self, "Error", 
+                               f"An error occurred while preparing waypoints: {str(e)}")
+    
+    def generate_selected_map(self):
+        """Generate map for the selected area"""
+        if not hasattr(self, 'current_map_name'):
+            self.status_label.setText("Please select a map first")
+            return
+        
+        coordinates = get_map_coordinates(self.current_map_name)
+        if not coordinates:
+            self.status_label.setText("No coordinates found for selected map")
+            return
+        
+        try:
+            # Disable all buttons during map generation
+            self.set_buttons_enabled(False)
+            
+            # Clear existing scene and items
+            self.scene.clear()
+            self.path_visualizer.clear_all()
+            self.nav_manager.waypoints = []  # Clear waypoints
+            
+            # Generate map filename based on map name
+            map_filename = f"{self.current_map_name.replace(' ', '_')}.pgm"
+            self.current_map_path = os.path.join(self.maps_dir, map_filename)
+            
+            # Generate the map
+            generate_map(coordinates, output_path=self.current_map_path)
+            
+            # Load the generated map
+            if self.nav_manager.load_map(self.current_map_path):
+                self.nav_manager.current_map_name = self.current_map_name
+                # Create a new scene
+                self.scene = QGraphicsScene()
+                self.view.setScene(self.scene)
+                self.path_visualizer = PathVisualizer(self.scene, self.nav_manager)
+                self.setup_scene()
+                self.set_buttons_enabled(True)
+                self.status_label.setText(f"Generated and loaded map: {self.current_map_name}")
+            else:
+                self.status_label.setText("Error loading generated map")
+        except Exception as e:
+            self.status_label.setText(f"Error generating map: {str(e)}")
+            self.set_buttons_enabled(False)
+    
     def setup_scene(self):
-        map_display = cv2.cvtColor(self.nav_manager.map_img, cv2.COLOR_GRAY2RGB)
-        bytes_per_line = 3 * self.nav_manager.width
-        qimg = QImage(map_display.data, self.nav_manager.width, self.nav_manager.height, 
-                     bytes_per_line, QImage.Format_RGB888)
-        pixmap = QPixmap.fromImage(qimg)
-        self.scene.addPixmap(pixmap)
-        
-        # Add border visualization
-        border_mask = (self.nav_manager.map_img == 0).astype(np.uint8) * 255
-        border_image = np.zeros((self.nav_manager.height, self.nav_manager.width, 4), dtype=np.uint8)
-        border_image[:, :, 2] = border_mask  # Red channel
-        border_image[:, :, 3] = border_mask  # Alpha channel
-        bytes_per_line = 4 * self.nav_manager.width
-        qimg_border = QImage(border_image.tobytes(), self.nav_manager.width, self.nav_manager.height, 
-                            bytes_per_line, QImage.Format_ARGB32)
-        pixmap_border = QPixmap.fromImage(qimg_border)
-        self.scene.addPixmap(pixmap_border)
-        
-        self.path_visualizer.draw_grid()
-        self.path_visualizer.update_display()
+        """Setup the scene with the current map"""
+        try:
+            if self.nav_manager.map_img is None:
+                self.setup_empty_scene()
+                return
+            
+            # Create new map display
+            map_display = cv2.cvtColor(self.nav_manager.map_img, cv2.COLOR_GRAY2RGB)
+            bytes_per_line = 3 * self.nav_manager.width
+            qimg = QImage(map_display.data, self.nav_manager.width, self.nav_manager.height, 
+                         bytes_per_line, QImage.Format_RGB888)
+            pixmap = QPixmap.fromImage(qimg)
+            self.scene.addPixmap(pixmap)
+            
+            # Add border visualization
+            border_mask = (self.nav_manager.map_img == 0).astype(np.uint8) * 255
+            border_image = np.zeros((self.nav_manager.height, self.nav_manager.width, 4), dtype=np.uint8)
+            border_image[:, :, 2] = border_mask  # Red channel
+            border_image[:, :, 3] = border_mask  # Alpha channel
+            bytes_per_line = 4 * self.nav_manager.width
+            qimg_border = QImage(border_image.tobytes(), self.nav_manager.width, self.nav_manager.height, 
+                                bytes_per_line, QImage.Format_ARGB32)
+            pixmap_border = QPixmap.fromImage(qimg_border)
+            self.scene.addPixmap(pixmap_border)
+            
+            # Draw new grid and update display
+            self.path_visualizer.draw_grid()
+            self.path_visualizer.update_display()
+            
+            # Reset zoom and center view
+            self.zoom_level = 1.0
+            self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
+        except Exception as e:
+            print(f"Error setting up scene: {str(e)}")
+            self.status_label.setText(f"Error setting up scene: {str(e)}")
     
     def add_waypoint(self, x, y):
         if self.nav_manager.add_waypoint(x, y):
@@ -457,7 +710,6 @@ class CustomGraphicsView(QGraphicsView):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    map_path = sys.argv[1] if len(sys.argv) > 1 else "map.pgm"
-    window = MapNavigator(map_path)
+    window = MapNavigator()
     window.show()
     sys.exit(app.exec_())
