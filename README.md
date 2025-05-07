@@ -5,7 +5,9 @@ This project is a Python-based application designed for visualizing and setting 
 ## Features
 - Visualize coverage path planning for USVs.
 - Generate navigation points for path following.
+- Upload path points to a database firebase
 - Customizable path planning to suit specific needs.
+- import or setup maps or area for navigation 
 
 ## Prerequisites
 Ensure you have Python installed on your system. This project requires Python 3.6 or higher.
@@ -25,17 +27,15 @@ Ensure you have Python installed on your system. This project requires Python 3.
 
 ## Usage
 
-1. Run the html file to get cordinate for the area that you need to work in 
+1. Run the html file in the 'mapGenerating folder' to get cordinate for the area that you want to work with  
 
-2. Run the python Generate map to generate a pgm file that have the picture of map  in pgm formate
-    ```bash
-    python generatePGM_Map.py
-    ```
-3. copie the map.pgm in  the pathplannig folder 
+2. coie and paste the cordinates to the map_data you can use the testing cordinates already in the scripte 
+
 
 4. Run the application:
     ```bash
-    python main.py map.pgm
+    cd pathPlannig
+    python3 main.py 
     ```
 
 
