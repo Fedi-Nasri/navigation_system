@@ -17,20 +17,20 @@ from mapGenrating.map_data import get_available_maps, get_map_coordinates
 from mapGenrating.generatePGM_Map import generate_map
 
 # Firebase configuration (commented out - to be implemented manually)
-"""
+
 import firebase_admin
 from firebase_admin import credentials, db
 
 def initialize_firebase():
-    cred = credentials.Certificate("path/to/your/serviceAccountKey.json")
+    cred = credentials.Certificate("auth.json")
     firebase_admin.initialize_app(cred, {
-        'databaseURL': 'your-database-url'
+        'databaseURL': 'https://oceancleaner-741db-default-rtdb.firebaseio.com'
     })
 
 def upload_waypoints_to_firebase(waypoints_data):
-    ref = db.reference('/waypoints')
+    ref = db.reference('navigation/coverage_path_planning')
     ref.push(waypoints_data)
-"""
+
 
 class NavigationManager:
     def __init__(self, grid_size=0.5, resolution=0.05):
@@ -367,6 +367,54 @@ class PathVisualizer:
         self.draw_path()
         self.draw_arrows()
 
+class CustomGraphicsView(QGraphicsView):
+    def __init__(self, scene):
+        super().__init__(scene)
+        self.setMouseTracking(True)
+        self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
+        self.setResizeAnchor(QGraphicsView.AnchorUnderMouse)
+        self.nav_manager = None  # Will be set by MapNavigator
+    
+    def set_nav_manager(self, nav_manager):
+        """Set the navigation manager for coordinate conversion"""
+        self.nav_manager = nav_manager
+    
+    def mouseMoveEvent(self, event):
+        """Handle mouse movement and update coordinate display"""
+        super().mouseMoveEvent(event)
+        if self.nav_manager and self.nav_manager.map_img is not None:
+            # Get mouse position in scene coordinates
+            pos = self.mapToScene(event.pos())
+            x, y = pos.x(), pos.y()
+            
+            # Convert to real-world coordinates (meters)
+            if 0 <= x < self.nav_manager.width and 0 <= y < self.nav_manager.height:
+                real_x = x * self.nav_manager.resolution
+                real_y = (self.nav_manager.height - y) * self.nav_manager.resolution
+                
+                # Update status label with coordinates
+                navigator = self.parent().parent()
+                navigator.update_coordinate_status(real_x, real_y)
+    
+    def wheelEvent(self, event: QWheelEvent):
+        navigator = self.parent().parent()
+        if event.angleDelta().y() > 0:
+            navigator.zoom_in()
+        else:
+            navigator.zoom_out()
+    
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton or event.button() == Qt.RightButton:
+            navigator = self.parent().parent()
+            pos = self.mapToScene(event.pos())
+            x, y = pos.x(), pos.y()
+            if event.button() == Qt.RightButton:
+                navigator.remove_nearest_waypoint(x, y)
+            else:
+                navigator.add_waypoint(x, y)
+        else:
+            super().mousePressEvent(event)
+
 class MapNavigator(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -421,6 +469,7 @@ class MapNavigator(QMainWindow):
         self.view.setMouseTracking(True)
         self.view.setRenderHint(QPainter.Antialiasing)
         self.view.setDragMode(QGraphicsView.ScrollHandDrag)
+        self.view.set_nav_manager(self.nav_manager)  # Set nav_manager for coordinate conversion
         
         self.path_visualizer = PathVisualizer(self.scene, self.nav_manager)
         
@@ -522,7 +571,7 @@ class MapNavigator(QMainWindow):
             
             if reply == QMessageBox.Yes:
                 # Firebase upload code (commented out - to be implemented manually)
-                """
+                
                 try:
                     initialize_firebase()
                     upload_waypoints_to_firebase(waypoints_data)
@@ -531,7 +580,7 @@ class MapNavigator(QMainWindow):
                 except Exception as e:
                     QMessageBox.critical(self, "Upload Error", 
                                        f"Failed to upload waypoints: {str(e)}")
-                """
+                
                 
                 # For testing, just print success message
                 print("Waypoints would be uploaded to Firebase here")
@@ -561,7 +610,7 @@ class MapNavigator(QMainWindow):
             # Clear existing scene and items
             self.scene.clear()
             self.path_visualizer.clear_all()
-            self.nav_manager.waypoints = []  # Clear waypoints
+            self.nav_manager.waypoints = []
             
             # Generate map filename based on map name
             map_filename = f"{self.current_map_name.replace(' ', '_')}.pgm"
@@ -577,6 +626,7 @@ class MapNavigator(QMainWindow):
                 self.scene = QGraphicsScene()
                 self.view.setScene(self.scene)
                 self.path_visualizer = PathVisualizer(self.scene, self.nav_manager)
+                self.view.set_nav_manager(self.nav_manager)  # Update nav_manager reference
                 self.setup_scene()
                 self.set_buttons_enabled(True)
                 self.status_label.setText(f"Generated and loaded map: {self.current_map_name}")
@@ -681,32 +731,21 @@ class MapNavigator(QMainWindow):
         transform.reset()
         transform.scale(self.zoom_level, self.zoom_level)
         self.view.setTransform(transform)
-
-class CustomGraphicsView(QGraphicsView):
-    def __init__(self, scene):
-        super().__init__(scene)
-        self.setMouseTracking(True)
-        self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
-        self.setResizeAnchor(QGraphicsView.AnchorUnderMouse)
     
-    def wheelEvent(self, event: QWheelEvent):
-        navigator = self.parent().parent()
-        if event.angleDelta().y() > 0:
-            navigator.zoom_in()
-        else:
-            navigator.zoom_out()
-    
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton or event.button() == Qt.RightButton:
-            navigator = self.parent().parent()
-            pos = self.mapToScene(event.pos())
-            x, y = pos.x(), pos.y()
-            if event.button() == Qt.RightButton:
-                navigator.remove_nearest_waypoint(x, y)
-            else:
-                navigator.add_waypoint(x, y)
-        else:
-            super().mousePressEvent(event)
+    def update_coordinate_status(self, x, y):
+        """Update the status label with current cursor coordinates"""
+        wp_count = len(self.nav_manager.get_waypoints())
+        # Convert to real-world coordinates
+        real_x = x * self.nav_manager.resolution
+        real_y = (self.nav_manager.height - y) * self.nav_manager.resolution
+        
+        self.status_label.setText(
+            f"Pixel Coordinates: X: {int(x)}, Y: {int(y)} | "
+            f"Real-world: X: {real_x:.2f}m, Y: {real_y:.2f}m | "
+            f"{wp_count} waypoints | "
+            f"Zoom: {self.zoom_level:.1f}x | "
+            "Click to add waypoint, Right-click to remove"
+        )
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
