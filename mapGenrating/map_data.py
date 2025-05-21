@@ -2,16 +2,38 @@ import firebase_admin
 from firebase_admin import credentials, db
 
 # Firebase configuration (commented out - to be implemented manually)
-"""
-cred = credentials.Certificate("path/to/your/serviceAccountKey.json")
+
+cred = credentials.Certificate("/home/fedi/Desktop/navigation_system-main/navigation_system/pathPlannig/auth.json")
 firebase_admin.initialize_app(cred, {
-    'databaseURL': 'your-database-url'
+    'databaseURL': 'https://oceancleaner-741db-default-rtdb.firebaseio.com/'
 })
 
 def get_maps_from_firebase():
-    ref = db.reference('/maps')
+    ref = db.reference('navigation/Maps')
     return ref.get()
-"""
+def fetch_and_format_maps_from_firebase():
+    """
+    Fetch maps from Firebase and format them to match MAPS_DATA structure:
+    """
+    raw_maps = get_maps_from_firebase()
+    formatted_maps = {}
+    if not raw_maps:
+        return formatted_maps
+
+    for map_id, map_obj in raw_maps.items():
+        name = map_obj.get("name", f"Map_{map_id}")
+        coords = []
+        for coord in map_obj.get("coordinates", []):
+            if isinstance(coord, dict):
+                coords.append({
+                    "lat": coord.get("lat"),
+                    "lng": coord.get("long") if "long" in coord else coord.get("lng")
+                })
+            else:
+                # Skip or handle non-dict coordinate entries
+                continue
+        formatted_maps[name] = coords
+    return formatted_maps
 
 # Temporary map data for testing
 MAPS_DATA = {
@@ -68,11 +90,15 @@ MAPS_DATA = {
         }
     ]
 }
-
+# Update MAPS_DATA with maps from Firebase if available
+MAPS_DATA.update(fetch_and_format_maps_from_firebase())
+# Uncomment the line below to fetch maps from Firebase only
+# MAPS_DATA = fetch_and_format_maps_from_firebase()
 def get_available_maps():
     """Get list of available map names"""
     return list(MAPS_DATA.keys())
 
 def get_map_coordinates(map_name):
     """Get coordinates for a specific map"""
-    return MAPS_DATA.get(map_name, []) 
+    return MAPS_DATA.get(map_name, [])
+
