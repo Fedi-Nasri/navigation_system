@@ -22,11 +22,13 @@ import firebase_admin
 from firebase_admin import credentials, db
 
 def initialize_firebase():
-    cred = credentials.Certificate("auth.json")
-    firebase_admin.initialize_app(cred, {
-        'databaseURL': 'https://oceancleaner-741db-default-rtdb.firebaseio.com'
-    })
-
+    # Check if Firebase app is already initialized
+    if not firebase_admin._apps:
+        cred = credentials.Certificate("auth.json")
+        firebase_admin.initialize_app(cred, {
+            'databaseURL': 'https://oceancleaner-741db-default-rtdb.firebaseio.com'
+        })
+        
 def upload_waypoints_to_firebase(waypoints_data):
     ref = db.reference('navigation/coverage_path_planning')
     ref.push(waypoints_data)

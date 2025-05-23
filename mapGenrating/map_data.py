@@ -3,7 +3,7 @@ from firebase_admin import credentials, db
 
 # Firebase configuration (commented out - to be implemented manually)
 
-cred = credentials.Certificate("/home/fedi/Desktop/navigation_system-main/navigation_system/pathPlannig/auth.json")
+cred = credentials.Certificate("/home/fedi/Desktop/navigation2/navigation_system/pathPlannig/auth.json")
 firebase_admin.initialize_app(cred, {
     'databaseURL': 'https://oceancleaner-741db-default-rtdb.firebaseio.com/'
 })
