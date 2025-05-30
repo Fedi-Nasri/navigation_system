@@ -5,7 +5,7 @@ import cv2
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QGraphicsView, 
                             QGraphicsScene, QGraphicsPixmapItem, QVBoxLayout,
                             QWidget, QPushButton, QLabel, QHBoxLayout, QComboBox,
-                            QMessageBox)
+                            QMessageBox, QLineEdit, QGridLayout)
 from PyQt5.QtGui import QPixmap, QImage, QPen, QColor, QWheelEvent, QPainter
 from PyQt5.QtCore import Qt, QPointF
 import math
@@ -33,6 +33,127 @@ def upload_waypoints_to_firebase(waypoints_data):
     ref = db.reference('navigation/coverage_path_planning')
     ref.push(waypoints_data)
 
+def check_user_credentials(username, password):
+    """Check user credentials against Firebase database"""
+    try:
+        initialize_firebase()
+        ref = db.reference('users')
+        users = ref.get()
+        
+        if not users:
+            return False, None
+            
+        for user_id, user_data in users.items():
+            if user_data.get('username') == username and user_data.get('password') == password:
+                # Check if user is admin
+                is_admin = user_data.get('privileges') == 'admin'
+                return True, is_admin
+        return False, None
+    except Exception as e:
+        print(f"Error checking credentials: {str(e)}")
+        return False, None
+
+class LoginWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Login - Boat Navigation System")
+        self.setGeometry(100, 100, 800, 400)
+        self.init_ui()
+        
+    def init_ui(self):
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        main_layout = QHBoxLayout(central_widget)
+        
+        # Left side - Login form
+        login_widget = QWidget()
+        login_layout = QGridLayout(login_widget)
+        
+        # Add login form elements
+        login_label = QLabel("Login")
+        login_label.setStyleSheet("font-size: 24px; font-weight: bold; margin-bottom: 20px;")
+        login_layout.addWidget(login_label, 0, 0, 1, 2, Qt.AlignCenter)
+        
+        username_label = QLabel("Username:")
+        self.username_input = QLineEdit()
+        self.username_input.setPlaceholderText("Enter username")
+        login_layout.addWidget(username_label, 1, 0)
+        login_layout.addWidget(self.username_input, 1, 1)
+        
+        password_label = QLabel("Password:")
+        self.password_input = QLineEdit()
+        self.password_input.setPlaceholderText("Enter password")
+        self.password_input.setEchoMode(QLineEdit.Password)
+        login_layout.addWidget(password_label, 2, 0)
+        login_layout.addWidget(self.password_input, 2, 1)
+        
+        login_button = QPushButton("Login")
+        login_button.clicked.connect(self.handle_login)
+        login_layout.addWidget(login_button, 3, 0, 1, 2)
+        
+        # Right side - Image
+        image_label = QLabel()
+        image_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "image.jpg")
+        if os.path.exists(image_path):
+            pixmap = QPixmap(image_path)
+            pixmap = pixmap.scaled(400, 400, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            image_label.setPixmap(pixmap)
+        else:
+            image_label.setText("Login Image\n(Place image.jpg in the same directory)")
+            image_label.setStyleSheet("background-color: #f0f0f0; padding: 20px;")
+        
+        # Add widgets to main layout
+        main_layout.addWidget(login_widget)
+        main_layout.addWidget(image_label)
+        
+        # Set styles
+        self.setStyleSheet("""
+            QMainWindow {
+                background-color: white;
+            }
+            QLabel {
+                font-size: 14px;
+            }
+            QLineEdit {
+                padding: 8px;
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                margin-bottom: 10px;
+            }
+            QPushButton {
+                padding: 10px;
+                background-color: #4CAF50;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+        """)
+    
+    def handle_login(self):
+        username = self.username_input.text()
+        password = self.password_input.text()
+        
+        if not username or not password:
+            QMessageBox.warning(self, "Error", "Please enter both username and password")
+            return
+        
+        is_valid, is_admin = check_user_credentials(username, password)
+        
+        if is_valid:
+            if is_admin:
+                self.nav_window = MapNavigator()
+                self.nav_window.show()
+                self.close()
+            else:
+                QMessageBox.critical(self, "Access Denied", 
+                    "Sorry, only administrators can access this application.\n"
+                    "Please contact your system administrator for access.")
+        else:
+            QMessageBox.critical(self, "Error", "Invalid username or password")
 
 class NavigationManager:
     def __init__(self, grid_size=0.5, resolution=0.05):
@@ -751,6 +872,6 @@ class MapNavigator(QMainWindow):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    window = MapNavigator()
+    window = LoginWindow()
     window.show()
     sys.exit(app.exec_())

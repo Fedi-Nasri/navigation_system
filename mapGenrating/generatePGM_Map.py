@@ -87,6 +87,9 @@ def generate_map(coordinates, output_path="map.pgm", resolution=0.05):
 
     # Save PGM
     cv2.imwrite(output_path, grid)
+    # Also save to the Gazebo maps directory
+    gazebo_map_path = "/home/fedi/asv_ws/src/asv_wave_sim/asv_wave_sim_gazebo/maps/map.pgm"
+    cv2.imwrite(gazebo_map_path, grid)
     return output_path
 
 if __name__ == "__main__":
