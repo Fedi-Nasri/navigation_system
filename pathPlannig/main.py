@@ -57,79 +57,173 @@ class LoginWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Login - Boat Navigation System")
-        self.setGeometry(100, 100, 800, 400)
+        self.setGeometry(100, 100, 1100, 500)
+        self.setMinimumSize(900, 500)
         self.init_ui()
         
     def init_ui(self):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QHBoxLayout(central_widget)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
         
         # Left side - Login form
         login_widget = QWidget()
-        login_layout = QGridLayout(login_widget)
+        login_widget.setStyleSheet("background-color: #f8f9fa;")
+        login_layout = QVBoxLayout(login_widget)
+        login_layout.setContentsMargins(50, 50, 50, 50)
         
-        # Add login form elements
-        login_label = QLabel("Login")
-        login_label.setStyleSheet("font-size: 24px; font-weight: bold; margin-bottom: 20px;")
-        login_layout.addWidget(login_label, 0, 0, 1, 2, Qt.AlignCenter)
+        # Logo/Title area
+        title_container = QWidget()
+        title_layout = QVBoxLayout(title_container)
+        title_layout.setAlignment(Qt.AlignCenter)
         
-        username_label = QLabel("Username:")
+        title_label = QLabel("Boat Navigation System")
+        title_label.setStyleSheet("""
+            font-size: 28px;
+            font-weight: bold;
+            color: #2c3e50;
+            margin-bottom: 10px;
+        """)
+        subtitle_label = QLabel("Administrator Login")
+        subtitle_label.setStyleSheet("""
+            font-size: 16px;
+            color: #7f8c8d;
+            margin-bottom: 30px;
+        """)
+        title_layout.addWidget(title_label, alignment=Qt.AlignCenter)
+        title_layout.addWidget(subtitle_label, alignment=Qt.AlignCenter)
+        
+        # Form container
+        form_container = QWidget()
+        form_layout = QVBoxLayout(form_container)
+        form_layout.setSpacing(20)
+        
+        # Username field
+        username_container = QWidget()
+        username_layout = QVBoxLayout(username_container)
+        username_layout.setSpacing(5)
+        
+        username_label = QLabel("Username")
+        username_label.setStyleSheet("""
+            font-size: 14px;
+            color: #34495e;
+            font-weight: bold;
+        """)
         self.username_input = QLineEdit()
-        self.username_input.setPlaceholderText("Enter username")
-        login_layout.addWidget(username_label, 1, 0)
-        login_layout.addWidget(self.username_input, 1, 1)
+        self.username_input.setPlaceholderText("Enter your username")
+        self.username_input.setMinimumHeight(40)
+        self.username_input.setStyleSheet("""
+            QLineEdit {
+                padding: 8px 15px;
+                border: 2px solid #e0e0e0;
+                border-radius: 8px;
+                background-color: white;
+                font-size: 14px;
+            }
+            QLineEdit:focus {
+                border: 2px solid #3498db;
+            }
+        """)
+        username_layout.addWidget(username_label)
+        username_layout.addWidget(self.username_input)
         
-        password_label = QLabel("Password:")
+        # Password field
+        password_container = QWidget()
+        password_layout = QVBoxLayout(password_container)
+        password_layout.setSpacing(5)
+        
+        password_label = QLabel("Password")
+        password_label.setStyleSheet("""
+            font-size: 14px;
+            color: #34495e;
+            font-weight: bold;
+        """)
         self.password_input = QLineEdit()
-        self.password_input.setPlaceholderText("Enter password")
+        self.password_input.setPlaceholderText("Enter your password")
         self.password_input.setEchoMode(QLineEdit.Password)
-        login_layout.addWidget(password_label, 2, 0)
-        login_layout.addWidget(self.password_input, 2, 1)
+        self.password_input.setMinimumHeight(40)
+        self.password_input.setStyleSheet("""
+            QLineEdit {
+                padding: 8px 15px;
+                border: 2px solid #e0e0e0;
+                border-radius: 8px;
+                background-color: white;
+                font-size: 14px;
+            }
+            QLineEdit:focus {
+                border: 2px solid #3498db;
+            }
+        """)
+        password_layout.addWidget(password_label)
+        password_layout.addWidget(self.password_input)
         
+        # Login button
         login_button = QPushButton("Login")
+        login_button.setMinimumHeight(45)
+        login_button.setCursor(Qt.PointingHandCursor)
         login_button.clicked.connect(self.handle_login)
-        login_layout.addWidget(login_button, 3, 0, 1, 2)
+        login_button.setStyleSheet("""
+            QPushButton {
+                background-color: #3498db;
+                color: white;
+                border: none;
+                border-radius: 8px;
+                font-size: 16px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #2980b9;
+            }
+            QPushButton:pressed {
+                background-color: #2472a4;
+            }
+        """)
+        
+        # Add widgets to form layout
+        form_layout.addWidget(username_container)
+        form_layout.addWidget(password_container)
+        form_layout.addWidget(login_button)
+        form_layout.addStretch()
+        
+        # Add all containers to login layout
+        login_layout.addWidget(title_container)
+        login_layout.addWidget(form_container)
         
         # Right side - Image
+        image_container = QWidget()
+        image_container.setStyleSheet("background-color: white;")
+        image_layout = QVBoxLayout(image_container)
+        image_layout.setContentsMargins(0, 0, 0, 0)
+        
         image_label = QLabel()
         image_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "image.jpg")
         if os.path.exists(image_path):
             pixmap = QPixmap(image_path)
-            pixmap = pixmap.scaled(400, 400, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            pixmap = pixmap.scaled(500, 500, Qt.KeepAspectRatio, Qt.SmoothTransformation)
             image_label.setPixmap(pixmap)
+            image_label.setAlignment(Qt.AlignCenter)
         else:
             image_label.setText("Login Image\n(Place image.jpg in the same directory)")
-            image_label.setStyleSheet("background-color: #f0f0f0; padding: 20px;")
+            image_label.setStyleSheet("""
+                background-color: #f8f9fa;
+                padding: 20px;
+                color: #7f8c8d;
+                font-size: 14px;
+            """)
+            image_label.setAlignment(Qt.AlignCenter)
+        
+        image_layout.addWidget(image_label)
         
         # Add widgets to main layout
-        main_layout.addWidget(login_widget)
-        main_layout.addWidget(image_label)
+        main_layout.addWidget(login_widget, 1)
+        main_layout.addWidget(image_container, 1)
         
-        # Set styles
+        # Set window style
         self.setStyleSheet("""
             QMainWindow {
                 background-color: white;
-            }
-            QLabel {
-                font-size: 14px;
-            }
-            QLineEdit {
-                padding: 8px;
-                border: 1px solid #ccc;
-                border-radius: 4px;
-                margin-bottom: 10px;
-            }
-            QPushButton {
-                padding: 10px;
-                background-color: #4CAF50;
-                color: white;
-                border: none;
-                border-radius: 4px;
-                font-size: 14px;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
             }
         """)
     
@@ -557,6 +651,9 @@ class MapNavigator(QMainWindow):
         self.min_zoom = 0.1
         self.max_zoom = 10.0
         
+        # Flag to track if mission has been started
+        self.mission_started = False
+        
         self.init_ui()
     
     def init_ui(self):
@@ -582,10 +679,40 @@ class MapNavigator(QMainWindow):
         self.upload_btn.clicked.connect(self.upload_waypoints)
         self.upload_btn.setEnabled(False)  # Initially disabled
         
+        # Add Start Mission button
+        self.start_mission_btn = QPushButton("Start Mission")
+        self.start_mission_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2ecc71;
+                color: white;
+                border: none;
+                border-radius: 8px;
+                padding: 12px 25px;
+                font-size: 16px;
+                font-weight: bold;
+                min-width: 150px;
+            }
+            QPushButton:hover {
+                background-color: #27ae60;
+            }
+            QPushButton:pressed {
+                background-color: #219a52;
+            }
+            QPushButton:disabled {
+                background-color: #95a5a6;
+                cursor: not-allowed;
+            }
+        """)
+        self.start_mission_btn.setCursor(Qt.PointingHandCursor)
+        self.start_mission_btn.clicked.connect(self.start_mission)
+        self.start_mission_btn.setEnabled(False)  # Initially disabled
+        
         # Add buttons to top control layout
         top_control_layout.addWidget(self.map_selector)
         top_control_layout.addWidget(self.generate_map_btn)
         top_control_layout.addWidget(self.upload_btn)
+        top_control_layout.addStretch()  # Add stretch to push mission button to the right
+        top_control_layout.addWidget(self.start_mission_btn)
         
         self.scene = QGraphicsScene()
         self.view = CustomGraphicsView(self.scene)
@@ -664,6 +791,7 @@ class MapNavigator(QMainWindow):
             self.save_btn.setEnabled(enabled)
             self.create_path_btn.setEnabled(enabled)
             self.upload_btn.setEnabled(enabled)
+            self.start_mission_btn.setEnabled(enabled and not self.mission_started)
         except Exception as e:
             print(f"Error setting button states: {str(e)}")
     
@@ -869,6 +997,50 @@ class MapNavigator(QMainWindow):
             f"Zoom: {self.zoom_level:.1f}x | "
             "Click to add waypoint, Right-click to remove"
         )
+    
+    def start_mission(self):
+        """Execute the ROS launch file for the mission"""
+        try:
+            # Disable the button after first click
+            self.mission_started = True
+            self.start_mission_btn.setEnabled(False)
+            self.start_mission_btn.setText("Mission Started")
+            
+            # Command to execute the ROS launch file
+            # Replace this with your actual ROS launch command
+            launch_command = "roslaunch your_package your_launch_file.launch"
+            
+            # Execute the command
+            process = subprocess.Popen(
+                launch_command,
+                shell=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+            
+            # Wait for a short time to check if the command started successfully
+            try:
+                stdout, stderr = process.communicate(timeout=5)
+                if process.returncode != 0:
+                    raise Exception(f"Command failed with error: {stderr.decode()}")
+            except subprocess.TimeoutExpired:
+                # If the command is still running after timeout, it's probably successful
+                pass
+            
+            QMessageBox.information(self, "Success", "Mission started successfully!")
+            
+        except Exception as e:
+            self.mission_started = False
+            self.start_mission_btn.setEnabled(True)
+            self.start_mission_btn.setText("Start Mission")
+            
+            error_msg = str(e)
+            QMessageBox.critical(
+                self,
+                "Error Starting Mission",
+                f"Failed to start mission: {error_msg}\n\n"
+                "Please check if ROS is running and try again manually."
+            )
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
