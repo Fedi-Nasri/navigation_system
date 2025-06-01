@@ -15,6 +15,7 @@ from datetime import datetime
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from mapGenrating.map_data import get_available_maps, get_map_coordinates
 from mapGenrating.generatePGM_Map import generate_map
+import subprocess
 
 # Firebase configuration (commented out - to be implemented manually)
 
@@ -706,13 +707,42 @@ class MapNavigator(QMainWindow):
         self.start_mission_btn.setCursor(Qt.PointingHandCursor)
         self.start_mission_btn.clicked.connect(self.start_mission)
         self.start_mission_btn.setEnabled(False)  # Initially disabled
+
+        # Add End Mission button
+        self.end_mission_btn = QPushButton("End Mission")
+        self.end_mission_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #e74c3c;
+                color: white;
+                border: none;
+                border-radius: 8px;
+                padding: 12px 25px;
+                font-size: 16px;
+                font-weight: bold;
+                min-width: 150px;
+            }
+            QPushButton:hover {
+                background-color: #c0392b;
+            }
+            QPushButton:pressed {
+                background-color: #a93226;
+            }
+            QPushButton:disabled {
+                background-color: #95a5a6;
+                cursor: not-allowed;
+            }
+        """)
+        self.end_mission_btn.setCursor(Qt.PointingHandCursor)
+        self.end_mission_btn.clicked.connect(self.end_mission)
+        self.end_mission_btn.setEnabled(False)  # Initially disabled
         
         # Add buttons to top control layout
         top_control_layout.addWidget(self.map_selector)
         top_control_layout.addWidget(self.generate_map_btn)
         top_control_layout.addWidget(self.upload_btn)
-        top_control_layout.addStretch()  # Add stretch to push mission button to the right
+        top_control_layout.addStretch()  # Add stretch to push mission buttons to the right
         top_control_layout.addWidget(self.start_mission_btn)
+        top_control_layout.addWidget(self.end_mission_btn)
         
         self.scene = QGraphicsScene()
         self.view = CustomGraphicsView(self.scene)
@@ -792,6 +822,7 @@ class MapNavigator(QMainWindow):
             self.create_path_btn.setEnabled(enabled)
             self.upload_btn.setEnabled(enabled)
             self.start_mission_btn.setEnabled(enabled and not self.mission_started)
+            self.end_mission_btn.setEnabled(enabled and self.mission_started)
         except Exception as e:
             print(f"Error setting button states: {str(e)}")
     
@@ -1001,14 +1032,14 @@ class MapNavigator(QMainWindow):
     def start_mission(self):
         """Execute the ROS launch file for the mission"""
         try:
-            # Disable the button after first click
+            # Disable the start button and enable end button
             self.mission_started = True
             self.start_mission_btn.setEnabled(False)
+            self.end_mission_btn.setEnabled(True)
             self.start_mission_btn.setText("Mission Started")
             
             # Command to execute the ROS launch file
-            # Replace this with your actual ROS launch command
-            launch_command = "roslaunch your_package your_launch_file.launch"
+            launch_command = "cd ~/asv_ws & roslaunch asv_wave_sim_gazebo ocean_world.launch"
             
             # Execute the command
             process = subprocess.Popen(
@@ -1032,6 +1063,7 @@ class MapNavigator(QMainWindow):
         except Exception as e:
             self.mission_started = False
             self.start_mission_btn.setEnabled(True)
+            self.end_mission_btn.setEnabled(False)
             self.start_mission_btn.setText("Start Mission")
             
             error_msg = str(e)
@@ -1040,6 +1072,46 @@ class MapNavigator(QMainWindow):
                 "Error Starting Mission",
                 f"Failed to start mission: {error_msg}\n\n"
                 "Please check if ROS is running and try again manually."
+            )
+
+    def end_mission(self):
+        """Execute the command to end the mission"""
+        try:
+            # Command to stop the mission
+            end_command = "rosnode kill /gazebo /gazebo_gui /rosout"
+            
+            # Execute the command
+            process = subprocess.Popen(
+                end_command,
+                shell=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+            
+            # Wait for a short time to check if the command executed successfully
+            try:
+                stdout, stderr = process.communicate(timeout=5)
+                if process.returncode != 0:
+                    raise Exception(f"Command failed with error: {stderr.decode()}")
+            except subprocess.TimeoutExpired:
+                # If the command is still running after timeout, it's probably successful
+                pass
+            
+            # Reset mission state
+            self.mission_started = False
+            self.start_mission_btn.setEnabled(True)
+            self.end_mission_btn.setEnabled(False)
+            self.start_mission_btn.setText("Start Mission")
+            
+            QMessageBox.information(self, "Success", "Mission ended successfully!")
+            
+        except Exception as e:
+            error_msg = str(e)
+            QMessageBox.critical(
+                self,
+                "Error Ending Mission",
+                f"Failed to end mission: {error_msg}\n\n"
+                "Please try ending the mission manually."
             )
 
 if __name__ == "__main__":
